@@ -1,0 +1,467 @@
+SELECT
+STUFF(
+(
+SELECT 
+    ',' + CAST(CAST(LineTotal AS MONEY)AS VARCHAR)
+FROM AdventureWorks2019.Sales.SalesOrderDetail A 
+WHERE A.SalesOrderID = 43659
+FOR XML PATH('')
+),
+1,1,'')
+
+SELECT
+    SalesOrderID
+    ,OrderDate
+    ,SubTotal
+    ,TaxAmt
+    ,Freight
+    ,TotalDue
+    ,LineTotals = STUFF(
+                (
+                SELECT 
+                    ',' + CAST(CAST(LineTotal AS MONEY)AS VARCHAR)
+                FROM AdventureWorks2019.Sales.SalesOrderDetail B  
+                WHERE A.SalesOrderID = B.SalesOrderID
+                FOR XML PATH('')
+                ),
+                1,1,'')
+
+FROM AdventureWorks2019.Sales.SalesOrderHeader A 
+
+--Exercise 1
+SELECT
+    SubcategoryName = Name,
+    Products = STUFF (
+        (SELECT
+        ';' + Name
+                FROM AdventureWorks2019.Production.Product B  
+                WHERE B.ProductSubcategoryID = A.ProductSubcategoryID
+                AND B.ListPrice > 50
+                FOR XML PATH('')
+            ),
+            1,1,'')
+FROM AdventureWorks2019.Production.ProductSubcategory A 
+
+--PIVOT
+SELECT
+[Order Quantity] = OrderQty,
+[Bikes],
+[Clothing]
+FROM
+(
+    SELECT
+        ProductCategoryName = D.Name,
+        A.LineTotal,
+        A.OrderQty
+
+FROM AdventureWorks2019.Sales.SalesOrderDetail A 
+JOIN AdventureWorks2019.Production.Product B 
+    ON A.ProductID = B.ProductID
+JOIN AdventureWorks2019.Production.ProductSubcategory C 
+    ON B.ProductSubcategoryID = C.ProductSubcategoryID
+JOIN AdventureWorks2019.Production.ProductCategory D 
+    ON C.ProductCategoryID = D.ProductCategoryID
+) E 
+
+PIVOT(
+  SUM(LineTotal)
+  FOR ProductCategoryName IN(Bikes, Clothing)  
+) F 
+ORDER BY 1
+
+--Exercise 1
+SELECT 
+[Sales Representative],
+[Buyer],
+[Janitor]
+FROM (
+    SELECT 
+    Positions = JobTitle,
+    VacationHours
+    FROM AdventureWorks2019.HumanResources.Employee  
+) A  
+
+PIVOT(
+AVG(VacationHours)
+FOR Positions IN([Sales Representative],[Buyer],[Janitor])) B 
+ORDER BY 1
+
+--Exercise 2
+SELECT 
+[Employee Gender] = Gender,
+[Sales Representative],
+[Buyer],
+[Janitor]
+FROM (
+    SELECT 
+    Positions = JobTitle,
+    VacationHours,
+    Gender
+    FROM AdventureWorks2019.HumanResources.Employee  
+) A  
+
+PIVOT(
+AVG(VacationHours)
+FOR Positions IN([Sales Representative],[Buyer],[Janitor])) B
+ORDER BY 1
+
+---CTE
+SELECT 
+    OrderDate,
+    TotalDue,
+    OrderMonth = DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1)
+FROM AdventureWorks2019.Sales.SalesOrderHeader
+
+--------------------------------
+SELECT
+A.OrderMonth,
+A.Top10Total, 
+PrevTop10Total = B.Top10Total
+FROM 
+(SELECT
+OrderMonth,
+Top10Total = SUM(TotalDue)
+FROM (
+SELECT 
+    OrderDate,
+    TotalDue,
+    OrderMonth = DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1),
+    OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) ORDER BY TotalDue DESC)
+FROM AdventureWorks2019.Sales.SalesOrderHeader
+) X 
+WHERE OrderRank <= 10
+GROUP BY OrderMonth) A 
+LEFT JOIN
+(SELECT
+OrderMonth,
+Top10Total = SUM(TotalDue)
+FROM (
+SELECT 
+    OrderDate,
+    TotalDue,
+    OrderMonth = DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1),
+    OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) ORDER BY TotalDue DESC)
+FROM AdventureWorks2019.Sales.SalesOrderHeader
+) X 
+WHERE OrderRank <= 10
+GROUP BY OrderMonth) B 
+ON A.OrderMonth = DATEADD(MONTH, 1, B.OrderMonth)
+ORDER BY OrderMonth
+-----------------------------------------------------------------------------
+WITH Sales AS
+(
+SELECT 
+    OrderDate,
+    TotalDue,
+    OrderMonth = DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1),
+    OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) ORDER BY TotalDue DESC)
+FROM AdventureWorks2019.Sales.SalesOrderHeader
+),
+Top10 AS (
+SELECT
+OrderMonth,
+Top10Total = SUM(TotalDue)
+FROM Sales 
+WHERE OrderRank <= 10
+GROUP BY OrderMonth
+)
+SELECT 
+A.OrderMonth,
+A.Top10Total,
+PrevTop10Total = B.Top10Total
+FROM Top10 A 
+LEFT JOIN Top10 B 
+ON A.OrderMonth = DATEADD(MONTH, 1, B.OrderMonth)
+ORDER BY 1
+
+--Exercise
+WITH SalesTable AS (
+SELECT 
+	    OrderDate
+		  ,OrderMonth = DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1)
+		  ,TotalDue
+		  ,OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1) ORDER BY TotalDue DESC)
+		FROM AdventureWorks2019.Sales.SalesOrderHeader
+),
+PurchaseTable AS (
+    SELECT 
+		   OrderDate
+		  ,OrderMonth = DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1)
+		  ,TotalDue
+		  ,OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1) ORDER BY TotalDue DESC)
+		FROM AdventureWorks2019.Purchasing.PurchaseOrderHeader
+),
+Sales AS (
+    SELECT
+	OrderMonth,
+	TotalSales = SUM(TotalDue)
+	FROM SalesTable
+    WHERE OrderRank > 10
+	GROUP BY OrderMonth
+),
+Purchases AS(
+    SELECT
+	OrderMonth,
+	TotalPurchases = SUM(TotalDue)
+    FROM PurchaseTable
+    WHERE OrderRank > 10
+	GROUP BY OrderMonth
+)
+SELECT 
+    A.OrderMonth,
+    A.TotalSales,
+    B.TotalPurchases
+FROM Sales AS A 
+JOIN Purchases AS B 
+ON A.OrderMonth = B.OrderMonth
+ORDER BY 1
+-------------------------------------------------------------------------
+--Recursive CTE
+WITH NumberSeries AS 
+(
+    SELECT 1 AS MyNumber
+    
+    UNION ALL
+
+    SELECT MyNumber + 1
+    FROM NumberSeries
+    WHERE MyNumber < 100
+)
+
+SELECT MyNumber
+FROM NumberSeries;
+
+
+
+WITH DateSeries AS 
+(
+    SELECT CAST('01-01-2021' AS DATE) AS MyDate
+    
+    UNION ALL
+
+    SELECT DATEADD(DAY, 1, MyDate)
+    FROM DateSeries
+    WHERE MyDate < CAST('12-31-2021' AS DATE)
+)
+
+SELECT MyDate
+FROM DateSeries
+OPTION(MAXRECURSION 365)
+
+--Exercise 1
+WITH Odds AS 
+(
+    SELECT 1 AS MyOddNumber
+    
+    UNION ALL
+
+    SELECT MyOddNumber + 2
+    FROM Odds
+    WHERE MyOddNumber < 98
+)
+
+SELECT MyOddNumber
+FROM Odds;
+
+--Exercise 2
+WITH DateSeries AS 
+(
+    SELECT CAST('01-01-2020' AS DATE) AS MyDate
+    
+    UNION ALL
+
+    SELECT DATEADD(MONTH, 1, MyDate)
+    FROM DateSeries
+    WHERE MyDate < CAST('12-01-2029' AS DATE)
+)
+
+SELECT MyDate
+FROM DateSeries
+OPTION(MAXRECURSION 120)
+----------------------------------------------------------------------------------
+--Temp Tables
+ SELECT 
+    OrderDate,
+    OrderMonth = DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1),
+    TotalDue,
+    OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) ORDER BY TotalDue DESC)
+INTO #Sales 
+FROM AdventureWorks2019.Sales.SalesOrderHeader
+
+SELECT
+OrderMonth,
+Top10Total = SUM(TotalDue)
+INTO #Top10Sales
+FROM #Sales 
+WHERE OrderRank <= 10
+GROUP BY OrderMonth
+
+SELECT 
+A.OrderMonth,
+A.Top10Total,
+PrevTop10Total = B.Top10Total
+FROM #Top10Sales A 
+LEFT JOIN #Top10Sales B 
+ON A.OrderMonth = DATEADD(MONTH, 1, B.OrderMonth)
+ORDER BY 1
+
+SELECT * FROM #Sales WHERE OrderRank <= 5
+
+--Exercise 
+SELECT 
+	    OrderDate
+		  ,OrderMonth = DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1)
+		  ,TotalDue
+		  ,OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1) ORDER BY TotalDue DESC)
+		INTO #SalesTable
+        FROM AdventureWorks2019.Sales.SalesOrderHeader
+
+    SELECT 
+		   OrderDate
+		  ,OrderMonth = DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1)
+		  ,TotalDue
+		  ,OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1) ORDER BY TotalDue DESC)
+		INTO #PurchaseTable
+        FROM AdventureWorks2019.Purchasing.PurchaseOrderHeader
+
+
+    SELECT
+	OrderMonth,
+	TotalSales = SUM(TotalDue)
+	INTO #Sales1
+    FROM #SalesTable
+    WHERE OrderRank > 10
+	GROUP BY OrderMonth
+
+
+    SELECT
+	OrderMonth,
+	TotalPurchases = SUM(TotalDue)
+    INTO #Purchases
+    FROM #PurchaseTable
+    WHERE OrderRank > 10
+	GROUP BY OrderMonth
+
+SELECT 
+    A.OrderMonth,
+    A.TotalSales,
+    B.TotalPurchases
+FROM #Sales1 AS A 
+JOIN #Purchases AS B 
+ON A.OrderMonth = B.OrderMonth
+ORDER BY 1
+
+DROP TABLE #SalesTable   
+DROP TABLE #Sales1
+DROP TABLE #PurchaseTable
+DROP TABLE #Purchases 
+
+--Create and Insert
+ CREATE TABLE #Sales 
+ (
+    OrderDate DATE,
+    OrderMonth DATE,
+    TotalDue MONEY,
+    OrderRank INT
+ )
+
+ INSERT INTO #Sales 
+ (
+    OrderDate,
+    OrderMonth,
+    TotalDue,
+    OrderRank
+ )
+ SELECT 
+    OrderDate,
+    OrderMonth = DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1),
+    TotalDue,
+    OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) ORDER BY TotalDue DESC)
+FROM AdventureWorks2019.Sales.SalesOrderHeader
+
+CREATE TABLE #Top10Sales (
+    OrderMonth DATE, 
+    Top10Total MONEY 
+)
+INSERT INTO #Top10Sales
+SELECT
+OrderMonth,
+Top10Total = SUM(TotalDue)
+FROM #Sales 
+WHERE OrderRank <= 10
+GROUP BY OrderMonth
+
+SELECT 
+A.OrderMonth,
+A.Top10Total,
+PrevTop10Total = B.Top10Total
+FROM #Top10Sales A 
+LEFT JOIN #Top10Sales B 
+ON A.OrderMonth = DATEADD(MONTH, 1, B.OrderMonth)
+ORDER BY 1
+
+SELECT * FROM #Top10Sales
+
+DROP TABLE #Sales
+
+--Exercise 
+CREATE TABLE #SalesTable(
+    OrderDate DATE,
+    OrderMonth DATE,
+	TotalDue MONEY,
+	OrderRank INT
+)
+INSERT INTO #SalesTable
+SELECT 
+	    OrderDate
+		  ,OrderMonth = DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1)
+		  ,TotalDue
+		  ,OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1) ORDER BY TotalDue DESC)
+        FROM AdventureWorks2019.Sales.SalesOrderHeader
+
+CREATE TABLE #PurchaseTable(
+    OrderDate DATE,
+    OrderMonth DATE,
+	TotalDue MONEY,
+	OrderRank INT
+)
+INSERT INTO #PurchaseTable
+    SELECT 
+		   OrderDate
+		  ,OrderMonth = DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1)
+		  ,TotalDue
+		  ,OrderRank = ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1) ORDER BY TotalDue DESC)
+        FROM AdventureWorks2019.Purchasing.PurchaseOrderHeader
+
+CREATE TABLE #Sales1(
+    OrderMonth DATE,
+	TotalSales MONEY
+)
+INSERT INTO #Sales1
+    SELECT
+	OrderMonth,
+	TotalSales = SUM(TotalDue)
+    FROM #SalesTable
+    WHERE OrderRank > 10
+	GROUP BY OrderMonth
+
+CREATE TABLE #Purchases(
+    OrderMonth DATE,
+	TotalPurchases MONEY
+)
+INSERT INTO #Purchases
+    SELECT
+	OrderMonth,
+	TotalPurchases = SUM(TotalDue)
+    FROM #PurchaseTable
+    WHERE OrderRank > 10
+	GROUP BY OrderMonth
+
+SELECT 
+    A.OrderMonth,
+    A.TotalSales,
+    B.TotalPurchases
+FROM #Sales1 AS A 
+JOIN #Purchases AS B 
+ON A.OrderMonth = B.OrderMonth
+ORDER BY 1
